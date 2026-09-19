@@ -184,6 +184,7 @@ class StakeClient:
         )
         failures += errors
         for (sport, _category, tournament, fixture), payload in rows:
+            fixture_key = str(fixture.get("id") or fixture["slug"])
             names = fixture.get("competitors") or []
             if names and isinstance(names[0], dict):
                 names = [item.get("name", "") for item in names]
@@ -220,11 +221,26 @@ class StakeClient:
                             continue
                         inverse_sum = sum(1 / item["odds"] for item in outcomes)
                         overround = inverse_sum - 1
+                        market_outcomes = [
+                            {
+                                **item,
+                                "market_no_vig_probability": round(
+                                    (1 / item["odds"]) / inverse_sum, 4
+                                ),
+                            }
+                            for item in outcomes
+                        ]
+                        stake_favorite = max(
+                            market_outcomes,
+                            key=lambda item: item["market_no_vig_probability"],
+                        )["selection"]
                         for outcome in outcomes:
                             if odds_min <= outcome["odds"] <= odds_max:
                                 implied = 1 / outcome["odds"]
                                 candidates.append(
                                     {
+                                        "fixture_id": fixture_key,
+                                        "market_id": marker,
                                         "sport": sport["slug"],
                                         "league": tournament.get("name", ""),
                                         "event": event,
@@ -238,6 +254,11 @@ class StakeClient:
                                             implied / inverse_sum, 4
                                         ),
                                         "market_overround": round(overround, 4),
+                                        "market_outcomes": market_outcomes,
+                                        "stake_market_favorite": stake_favorite,
+                                        "is_stake_market_favorite": (
+                                            outcome["selection"] == stake_favorite
+                                        ),
                                         "protected_market": bool(
                                             protected.search(market_name)
                                         ),

@@ -9,12 +9,12 @@ from pathlib import Path
 import pandas as pd
 import streamlit as st
 
-from engine import evaluate, rank_candidates
+from engine import block_opposing_approvals, evaluate, rank_candidates
 from openrouter_client import OpenRouterError, build_consensus, judge_consensus, list_models, validate_candidate, verify_api_key
 from stake_client import StakeClient, StakeError
 
 ROOT = Path(__file__).parent
-APP_VERSION = "3.1.0"
+APP_VERSION = "3.2.0"
 CONFIG = json.loads((ROOT / "stake_logic_v2_strict.json").read_text(encoding="utf-8"))
 PROFILES = json.loads((ROOT / "analysis_profiles.json").read_text(encoding="utf-8"))
 
@@ -89,6 +89,7 @@ def display_table(rows: list[dict]) -> None:
     columns = {
         "start_rd": "Hora RD", "sport": "Deporte", "event": "Evento",
         "market": "Mercado", "selection": "Selección", "odds": "Cuota",
+        "stake_market_favorite": "Favorito Stake",
         "market_no_vig_probability": "Stake sin margen",
         "second_model_probability": "Consenso/modelo", "ev": "EV",
         "model_spread": "Dispersión", "status": "Estado",
@@ -202,7 +203,10 @@ with st.sidebar:
     )
     max_candidates = st.slider("Candidatos a validar", 1, 10, 2)
     calls = max_candidates * len(analyst_models) + (max_candidates if mode == "Consenso multiagente" else 0)
-    st.info(f"La corrida usará aproximadamente {calls} llamadas a OpenRouter.")
+    st.info(
+        f"La corrida usará aproximadamente {calls} llamadas a OpenRouter. "
+        "Los analistas y los jueces se ejecutan en paralelo."
+    )
     st.write(f"EV mínimo: **{profile['min_ev']:.0%}**")
     st.write(f"Stake máximo: **${bankroll * CONFIG['risk']['max_single_stake']:.2f}**")
 
@@ -301,13 +305,8 @@ with tab_run:
             st.error("Selecciona por lo menos dos modelos analistas.")
         else:
             targets = scan["candidates"][:max_candidates]
-            results = []
-            total_steps = len(targets) * (len(analyst_models) + (1 if mode == "Consenso multiagente" else 0))
-            completed = 0
-            bar = st.progress(0.0, text="Preparando análisis…")
-            context = history_context(st.session_state.history)
+            eligible, results = [], []
             for candidate in targets:
-                analyses, errors = [], []
                 if minutes_until_start(candidate["start_rd"]) < min_lead_minutes:
                     result_row = evaluate(
                         candidate, None, CONFIG, bankroll, pending, profile=profile
@@ -317,14 +316,26 @@ with tab_run:
                     )
                     result_row["status"] = "Descartado"
                     results.append(result_row)
-                    continue
+                else:
+                    eligible.append(candidate)
 
-                # Los analistas son independientes: ejecutarlos simultáneamente
-                # reduce el tiempo del consenso al del modelo más lento.
-                analyses_by_model = {}
-                with ThreadPoolExecutor(max_workers=max(1, len(analyst_models))) as executor:
-                    future_models = {
-                        executor.submit(
+            analyst_steps = len(eligible) * len(analyst_models)
+            judge_steps = len(eligible) if mode == "Consenso multiagente" else 0
+            total_steps = analyst_steps + judge_steps
+            completed = 0
+            bar = st.progress(0.0, text="Ejecutando analistas en paralelo…")
+            context = history_context(st.session_state.history)
+
+            # Todas las combinaciones candidato-modelo se envían al mismo tiempo.
+            # El límite evita saturar OpenRouter cuando se seleccionan muchos eventos.
+            analyses_by_candidate = {index: {} for index in range(len(eligible))}
+            errors_by_candidate = {index: [] for index in range(len(eligible))}
+            max_parallel = min(12, max(1, analyst_steps))
+            with ThreadPoolExecutor(max_workers=max_parallel) as executor:
+                future_models = {}
+                for index, candidate in enumerate(eligible):
+                    for analyst_model in analyst_models:
+                        future = executor.submit(
                             validate_candidate,
                             candidate,
                             api_key,
@@ -334,45 +345,79 @@ with tab_run:
                             profile_name,
                             profile["instructions"],
                             context,
-                        ): analyst_model
-                        for analyst_model in analyst_models
-                    }
-                    for future in as_completed(future_models):
-                        analyst_model = future_models[future]
-                        bar.progress(
-                            completed / max(total_steps, 1),
-                            text=f"Completado {analyst_model}: {candidate['selection']}",
                         )
-                        try:
-                            analyses_by_model[analyst_model] = future.result()
-                        except (OpenRouterError, ValueError, TypeError, AttributeError) as exc:
-                            errors.append(f"{analyst_model}: {exc}")
-                        except Exception as exc:
-                            errors.append(
-                                f"{analyst_model}: error inesperado del proveedor "
-                                f"({type(exc).__name__})."
-                            )
-                        completed += 1
-                analyses = [
-                    analyses_by_model[model]
-                    for model in analyst_models
-                    if model in analyses_by_model
-                ]
+                        future_models[future] = (index, analyst_model)
+                for future in as_completed(future_models):
+                    index, analyst_model = future_models[future]
+                    candidate = eligible[index]
+                    try:
+                        analyses_by_candidate[index][analyst_model] = future.result()
+                    except (OpenRouterError, ValueError, TypeError, AttributeError) as exc:
+                        errors_by_candidate[index].append(f"{analyst_model}: {exc}")
+                    except Exception as exc:
+                        errors_by_candidate[index].append(
+                            f"{analyst_model}: error inesperado del proveedor "
+                            f"({type(exc).__name__})."
+                        )
+                    completed += 1
+                    bar.progress(
+                        completed / max(total_steps, 1),
+                        text=f"Analista completado: {candidate['selection']}",
+                    )
 
-                judge = None
+            prepared = []
+            for index, candidate in enumerate(eligible):
+                analyses = [
+                    analyses_by_candidate[index][model]
+                    for model in analyst_models
+                    if model in analyses_by_candidate[index]
+                ]
+                errors = errors_by_candidate[index]
                 model_result = None
                 try:
                     if mode == "Consenso multiagente":
                         model_result = build_consensus(analyses, profile["max_model_spread"])
-                        bar.progress(completed / max(total_steps, 1), text=f"Juez: {candidate['selection']}")
-                        judge = judge_consensus(candidate, model_result, api_key, judge_model, profile_name)
-                        completed += 1
                     elif analyses:
                         model_result = analyses[0]
-                    result_row = evaluate(candidate, model_result, CONFIG, bankroll, pending, profile=profile, judge=judge)
                 except (OpenRouterError, ValueError) as exc:
-                    result_row = evaluate(candidate, None, CONFIG, bankroll, pending, profile=profile)
+                    model_result = None
                     errors.append(str(exc))
+                prepared.append((candidate, analyses, errors, model_result))
+
+            judges: dict[int, dict] = {}
+            if mode == "Consenso multiagente":
+                judge_jobs = {
+                    index: item for index, item in enumerate(prepared) if item[3]
+                }
+                with ThreadPoolExecutor(max_workers=min(8, max(1, len(judge_jobs)))) as executor:
+                    futures = {
+                        executor.submit(
+                            judge_consensus,
+                            item[0], item[3], api_key, judge_model, profile_name,
+                        ): index
+                        for index, item in judge_jobs.items()
+                    }
+                    for future in as_completed(futures):
+                        index = futures[future]
+                        try:
+                            judges[index] = future.result()
+                        except Exception as exc:
+                            prepared[index][2].append(
+                                f"Juez: {exc}" if isinstance(exc, OpenRouterError)
+                                else f"Juez: error inesperado ({type(exc).__name__})."
+                            )
+                        completed += 1
+                        bar.progress(
+                            completed / max(total_steps, 1),
+                            text=f"Juez completado: {prepared[index][0]['selection']}",
+                        )
+
+            for index, (candidate, analyses, errors, model_result) in enumerate(prepared):
+                judge = judges.get(index)
+                result_row = evaluate(
+                    candidate, model_result, CONFIG, bankroll, pending,
+                    profile=profile, judge=judge,
+                )
                 if errors:
                     result_row.setdefault("reasons", []).extend(errors)
                     if result_row.get("status") == "Aprobado":
@@ -392,7 +437,9 @@ with tab_run:
                         "Quedan menos de 5 minutos: no hay tiempo operativo para apostar."
                     )
                 results.append(result_row)
-            st.session_state.evaluations = rank_candidates(results)
+            st.session_state.evaluations = rank_candidates(
+                block_opposing_approvals(results)
+            )
             bar.empty()
 
     evaluations = st.session_state.evaluations

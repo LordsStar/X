@@ -145,6 +145,13 @@ Correcciones/resultados previos aportados por el usuario (úsalos solo como cont
 no como garantía de repetición): {corrections_context or 'Sin historial disponible'}
 
 Reglas:
+- market_outcomes contiene todas las selecciones y cuotas disponibles de este
+  mercado. Compáralas conjuntamente, aunque la salida solicite la probabilidad
+  de una sola selección.
+- stake_market_favorite identifica exclusivamente el favorito por cuota sin
+  margen. No describas otra selección como favorita de Stake.
+- En mercados sin empate, las probabilidades de resultados opuestos deben ser
+  complementarias. No presentes simultáneamente ambos lados como favoritos.
 - probability: probabilidad decimal de victoria de la selección (0 a 1). Para DNB
   no incluyas el empate dentro de probability; repórtalo por separado.
 - draw_probability: probabilidad decimal de empate si aplica; null en deportes sin empate.

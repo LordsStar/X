@@ -3,6 +3,31 @@ from __future__ import annotations
 from typing import Any
 
 
+def market_key(row: dict[str, Any]) -> tuple[str, str]:
+    """Identifica de forma estable todas las selecciones del mismo mercado."""
+    fixture = str(row.get("fixture_id") or f"{row.get('event')}|{row.get('start_rd')}")
+    market = str(row.get("market_id") or row.get("market"))
+    return fixture, market
+
+
+def block_opposing_approvals(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Nunca permite aprobar dos resultados incompatibles del mismo mercado."""
+    approved_by_market: dict[tuple[str, str], list[dict[str, Any]]] = {}
+    for row in rows:
+        if row.get("status") == "Aprobado":
+            approved_by_market.setdefault(market_key(row), []).append(row)
+    for conflicting in approved_by_market.values():
+        if len(conflicting) < 2:
+            continue
+        selections = ", ".join(str(row.get("selection")) for row in conflicting)
+        for row in conflicting:
+            row["status"] = "Descartado"
+            row.setdefault("reasons", []).append(
+                f"Conflicto de mercado: se aprobaron selecciones opuestas ({selections})."
+            )
+    return rows
+
+
 def evaluate(
     candidate: dict[str, Any],
     model: dict[str, Any] | None,
