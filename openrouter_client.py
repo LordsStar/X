@@ -67,8 +67,12 @@ def list_models(api_key: str = "", timeout: int = 30) -> list[dict[str, Any]]:
     return sorted(output, key=lambda item: item["id"].lower())
 
 
-def _message_text(message: dict[str, Any]) -> str:
+def _message_text(message: Any) -> str:
     """Normaliza contenido OpenRouter, que puede llegar como texto o bloques."""
+    if isinstance(message, str):
+        return message.strip()
+    if not isinstance(message, dict):
+        return ""
     content = message.get("content")
     if isinstance(content, str):
         return content.strip()
@@ -82,6 +86,9 @@ def _message_text(message: dict[str, Any]) -> str:
                 if isinstance(value, str):
                     parts.append(value)
         return "\n".join(parts).strip()
+    if isinstance(content, dict):
+        value = content.get("text") or content.get("content")
+        return value.strip() if isinstance(value, str) else ""
     return ""
 
 
@@ -203,7 +210,7 @@ Esquema exacto:
         body = response.json()
         message = body["choices"][0]["message"]
         content = _message_text(message)
-    except (ValueError, KeyError, IndexError, TypeError) as exc:
+    except (ValueError, KeyError, IndexError, TypeError, AttributeError) as exc:
         raise OpenRouterError("Respuesta inesperada de OpenRouter.") from exc
     if not content:
         # Algunos proveedores consumen la respuesta al usar búsqueda web o salida
@@ -230,7 +237,7 @@ Esquema exacto:
         try:
             retry_body = retry_response.json()
             content = _message_text(retry_body["choices"][0]["message"])
-        except (ValueError, KeyError, IndexError, TypeError) as exc:
+        except (ValueError, KeyError, IndexError, TypeError, AttributeError) as exc:
             raise OpenRouterError("Respuesta inesperada de OpenRouter en el reintento.") from exc
     result = _extract_json(content)
     missing = required - result.keys()
@@ -350,5 +357,5 @@ Devuelve SOLO JSON:
             "warnings": list(result.get("warnings", [])),
             "model": model,
         }
-    except (ValueError, KeyError, IndexError, TypeError) as exc:
+    except (ValueError, KeyError, IndexError, TypeError, AttributeError) as exc:
         raise OpenRouterError("Respuesta inválida del juez final.") from exc

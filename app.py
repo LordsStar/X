@@ -13,12 +13,16 @@ from openrouter_client import OpenRouterError, build_consensus, judge_consensus,
 from stake_client import StakeClient, StakeError
 
 ROOT = Path(__file__).parent
+APP_VERSION = "3.0.5"
 CONFIG = json.loads((ROOT / "stake_logic_v2_strict.json").read_text(encoding="utf-8"))
 PROFILES = json.loads((ROOT / "analysis_profiles.json").read_text(encoding="utf-8"))
 
-st.set_page_config(page_title="Stake Multiagente v3", page_icon="🎯", layout="wide")
+st.set_page_config(page_title=f"Stake Multiagente v{APP_VERSION}", page_icon="🎯", layout="wide")
 st.title("🎯 Corridas Stake — OpenRouter multiagente")
-st.caption("Stake directo · Perfiles especializados · Consenso de modelos · Juez independiente")
+st.caption(
+    f"Versión {APP_VERSION} · Stake directo · Perfiles especializados · "
+    "Consenso de modelos · Juez independiente"
+)
 
 DEFAULT_SINGLE_MODEL = "google/gemini-3.8-flash"
 DEFAULT_ANALYST_MODELS = [
@@ -69,6 +73,18 @@ def display_table(rows: list[dict]) -> None:
         st.info("No hay filas para mostrar.")
         return
     frame = pd.DataFrame(rows)
+    # Mantener una fecha real para que el orden sea cronológico. Si se convierte
+    # primero a texto con AM/PM, Streamlit la ordena alfabéticamente.
+    if "start_rd" in frame.columns:
+        frame["_start_sort"] = pd.to_datetime(
+            frame["start_rd"], errors="coerce", utc=True
+        )
+        frame = frame.sort_values(
+            ["_start_sort", "sport", "event"],
+            ascending=[True, True, True],
+            na_position="last",
+            kind="stable",
+        )
     columns = {
         "start_rd": "Hora RD", "sport": "Deporte", "event": "Evento",
         "market": "Mercado", "selection": "Selección", "odds": "Cuota",
@@ -82,8 +98,21 @@ def display_table(rows: list[dict]) -> None:
         if name in view:
             view[name] = view[name].map(lambda value: f"{float(value):.1%}" if pd.notna(value) else "—")
     if "Hora RD" in view:
-        view["Hora RD"] = pd.to_datetime(view["Hora RD"]).dt.strftime("%d/%m %I:%M %p")
-    st.dataframe(view, use_container_width=True, hide_index=True)
+        view["Hora RD"] = pd.to_datetime(
+            view["Hora RD"], errors="coerce", utc=True
+        ).dt.tz_convert("America/Santo_Domingo")
+    st.dataframe(
+        view,
+        use_container_width=True,
+        hide_index=True,
+        column_config={
+            "Hora RD": st.column_config.DatetimeColumn(
+                "Hora RD",
+                help="Hora de inicio en República Dominicana (UTC−4).",
+                format="DD/MM/YYYY hh:mm a",
+            )
+        },
+    )
 
 
 def history_context(history: list[dict]) -> str:
@@ -214,7 +243,12 @@ with tab_run:
             scan = StakeClient().scan(CONFIG, hours_ahead=hours, progress=progress)
             scan["candidates"] = sorted(
                 [row for row in scan["candidates"] if row["market_overround"] <= CONFIG["market_quality"]["max_overround"]],
-                key=lambda row: (-row["market_no_vig_probability"], row["start_rd"]),
+                key=lambda row: (
+                    row["start_rd"],
+                    -row["market_no_vig_probability"],
+                    row["sport"],
+                    row["event"],
+                ),
             )
             st.session_state.scan = scan
             st.session_state.evaluations = []
@@ -258,7 +292,7 @@ with tab_run:
                             profile_instructions=profile["instructions"],
                             corrections_context=context,
                         ))
-                    except (OpenRouterError, ValueError) as exc:
+                    except (OpenRouterError, ValueError, TypeError, AttributeError) as exc:
                         errors.append(f"{analyst_model}: {exc}")
                     completed += 1
 
