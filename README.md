@@ -1,6 +1,6 @@
 # Stake Direct v3 multiagente — Streamlit + OpenRouter
 
-Versión de la aplicación: **3.0.5**.
+Versión de la aplicación: **3.1.0**.
 
 Aplicación para consultar cuotas prepartido directamente desde
 `https://odds-data.stake.com`, filtrar candidatos y validarlos mediante un segundo
@@ -24,6 +24,9 @@ individual o entre dos y tres modelos analistas más un modelo juez independient
   texto, diccionario, bloques, `null` u otro formato inesperado.
 - Eventos ordenados inicialmente por hora de inicio y columna **Hora RD** conservada
   como fecha real, para que el orden interactivo sea cronológico y no alfabético.
+- Analistas del consenso ejecutados en paralelo para reducir el tiempo de espera.
+- Margen configurable antes del inicio (30 minutos por defecto) y segunda
+  comprobación horaria al terminar el análisis.
 - Consenso de 2–3 modelos con límite de dispersión probabilística.
 - Modelo juez que audita evidencia y contradicciones antes de aprobar.
 - Perfiles: estricto, equilibrado, MLB, fútbol y hockey.

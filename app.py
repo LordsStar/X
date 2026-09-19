@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import json
 import os
-from datetime import datetime
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pandas as pd
@@ -13,7 +14,7 @@ from openrouter_client import OpenRouterError, build_consensus, judge_consensus,
 from stake_client import StakeClient, StakeError
 
 ROOT = Path(__file__).parent
-APP_VERSION = "3.0.5"
+APP_VERSION = "3.1.0"
 CONFIG = json.loads((ROOT / "stake_logic_v2_strict.json").read_text(encoding="utf-8"))
 PROFILES = json.loads((ROOT / "analysis_profiles.json").read_text(encoding="utf-8"))
 
@@ -123,6 +124,17 @@ def history_context(history: list[dict]) -> str:
     return json.dumps(safe, ensure_ascii=False) if safe else ""
 
 
+def minutes_until_start(start_value: str) -> float:
+    """Minutos restantes usando el offset incluido por Stake."""
+    try:
+        start = datetime.fromisoformat(str(start_value).replace("Z", "+00:00"))
+        if start.tzinfo is None:
+            start = start.replace(tzinfo=timezone.utc)
+        return (start.astimezone(timezone.utc) - datetime.now(timezone.utc)).total_seconds() / 60
+    except (TypeError, ValueError):
+        return float("-inf")
+
+
 for key, default in {
     "scan": None,
     "evaluations": [],
@@ -180,7 +192,15 @@ with st.sidebar:
     bankroll = st.number_input("Banca actual (USD)", min_value=0.0, value=151.04, step=1.0)
     pending = st.number_input("Exposición pendiente (USD)", min_value=0.0, value=0.0, step=1.0)
     hours = st.slider("Ventana futura (horas)", 2, 36, 18)
-    max_candidates = st.slider("Candidatos a validar", 1, 10, 4)
+    min_lead_minutes = st.slider(
+        "Anticipación mínima al comenzar (minutos)",
+        5,
+        90,
+        30,
+        5,
+        help="Descarta eventos demasiado cercanos para completar el consenso antes del inicio.",
+    )
+    max_candidates = st.slider("Candidatos a validar", 1, 10, 2)
     calls = max_candidates * len(analyst_models) + (max_candidates if mode == "Consenso multiagente" else 0)
     st.info(f"La corrida usará aproximadamente {calls} llamadas a OpenRouter.")
     st.write(f"EV mínimo: **{profile['min_ev']:.0%}**")
@@ -242,7 +262,12 @@ with tab_run:
         try:
             scan = StakeClient().scan(CONFIG, hours_ahead=hours, progress=progress)
             scan["candidates"] = sorted(
-                [row for row in scan["candidates"] if row["market_overround"] <= CONFIG["market_quality"]["max_overround"]],
+                [
+                    row
+                    for row in scan["candidates"]
+                    if row["market_overround"] <= CONFIG["market_quality"]["max_overround"]
+                    and minutes_until_start(row["start_rd"]) >= min_lead_minutes
+                ],
                 key=lambda row: (
                     row["start_rd"],
                     -row["market_no_vig_probability"],
@@ -283,18 +308,56 @@ with tab_run:
             context = history_context(st.session_state.history)
             for candidate in targets:
                 analyses, errors = [], []
-                for analyst_model in analyst_models:
-                    bar.progress(completed / max(total_steps, 1), text=f"{analyst_model}: {candidate['selection']}")
-                    try:
-                        analyses.append(validate_candidate(
-                            candidate, api_key, analyst_model, use_web=use_web,
-                            profile_name=profile_name,
-                            profile_instructions=profile["instructions"],
-                            corrections_context=context,
-                        ))
-                    except (OpenRouterError, ValueError, TypeError, AttributeError) as exc:
-                        errors.append(f"{analyst_model}: {exc}")
-                    completed += 1
+                if minutes_until_start(candidate["start_rd"]) < min_lead_minutes:
+                    result_row = evaluate(
+                        candidate, None, CONFIG, bankroll, pending, profile=profile
+                    )
+                    result_row.setdefault("reasons", []).append(
+                        f"Quedan menos de {min_lead_minutes} minutos para comenzar."
+                    )
+                    result_row["status"] = "Descartado"
+                    results.append(result_row)
+                    continue
+
+                # Los analistas son independientes: ejecutarlos simultáneamente
+                # reduce el tiempo del consenso al del modelo más lento.
+                analyses_by_model = {}
+                with ThreadPoolExecutor(max_workers=max(1, len(analyst_models))) as executor:
+                    future_models = {
+                        executor.submit(
+                            validate_candidate,
+                            candidate,
+                            api_key,
+                            analyst_model,
+                            use_web,
+                            90,
+                            profile_name,
+                            profile["instructions"],
+                            context,
+                        ): analyst_model
+                        for analyst_model in analyst_models
+                    }
+                    for future in as_completed(future_models):
+                        analyst_model = future_models[future]
+                        bar.progress(
+                            completed / max(total_steps, 1),
+                            text=f"Completado {analyst_model}: {candidate['selection']}",
+                        )
+                        try:
+                            analyses_by_model[analyst_model] = future.result()
+                        except (OpenRouterError, ValueError, TypeError, AttributeError) as exc:
+                            errors.append(f"{analyst_model}: {exc}")
+                        except Exception as exc:
+                            errors.append(
+                                f"{analyst_model}: error inesperado del proveedor "
+                                f"({type(exc).__name__})."
+                            )
+                        completed += 1
+                analyses = [
+                    analyses_by_model[model]
+                    for model in analyst_models
+                    if model in analyses_by_model
+                ]
 
                 judge = None
                 model_result = None
@@ -317,6 +380,17 @@ with tab_run:
                 if model_result:
                     result_row["model_spread"] = model_result.get("model_spread")
                     result_row["individual_analyses"] = model_result.get("individual_analyses", analyses)
+                remaining = minutes_until_start(candidate["start_rd"])
+                if remaining <= 0:
+                    result_row["status"] = "Descartado"
+                    result_row.setdefault("reasons", []).append(
+                        "El evento comenzó mientras se ejecutaba el análisis."
+                    )
+                elif remaining < 5:
+                    result_row["status"] = "Descartado"
+                    result_row.setdefault("reasons", []).append(
+                        "Quedan menos de 5 minutos: no hay tiempo operativo para apostar."
+                    )
                 results.append(result_row)
             st.session_state.evaluations = rank_candidates(results)
             bar.empty()
