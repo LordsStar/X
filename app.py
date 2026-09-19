@@ -94,7 +94,13 @@ def history_context(history: list[dict]) -> str:
     return json.dumps(safe, ensure_ascii=False) if safe else ""
 
 
-for key, default in {"scan": None, "evaluations": [], "history": [], "model_catalog": []}.items():
+for key, default in {
+    "scan": None,
+    "evaluations": [],
+    "history": [],
+    "model_catalog": [],
+    "scan_notice": "",
+}.items():
     if key not in st.session_state:
         st.session_state[key] = default
 
@@ -191,6 +197,9 @@ with tab_rules:
     st.json({"logic": CONFIG, "active_profile": profile, "profiles": PROFILES})
 
 with tab_run:
+    if st.session_state.scan_notice:
+        st.success(st.session_state.scan_notice)
+        st.session_state.scan_notice = ""
     col_a, col_b = st.columns(2)
     run_scan = col_a.button("🔄 Consultar Stake", type="primary", use_container_width=True)
     validate = col_b.button("🧠 Ejecutar análisis", use_container_width=True, disabled=st.session_state.scan is None)
@@ -209,8 +218,9 @@ with tab_run:
             )
             st.session_state.scan = scan
             st.session_state.evaluations = []
+            st.session_state.scan_notice = "Consulta directa terminada. Ya puedes ejecutar el análisis."
             progress_bar.empty()
-            st.success("Consulta directa terminada.")
+            st.rerun()
         except StakeError as exc:
             progress_bar.empty()
             st.error(str(exc))

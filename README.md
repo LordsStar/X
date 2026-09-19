@@ -16,6 +16,8 @@ individual o entre dos y tres modelos analistas más un modelo juez independient
 - Cálculo de probabilidad implícita, probabilidad sin margen y overround.
 - Validación externa mediante OpenRouter, opcionalmente con búsqueda web.
 - Selector dinámico de cualquier modelo disponible en OpenRouter.
+- Reintento automático cuando un proveedor devuelve contenido vacío al combinar
+  búsqueda web y salida JSON estructurada.
 - Consenso de 2–3 modelos con límite de dispersión probabilística.
 - Modelo juez que audita evidencia y contradicciones antes de aprobar.
 - Perfiles: estricto, equilibrado, MLB, fútbol y hockey.
@@ -76,6 +78,9 @@ No subas `.streamlit/secrets.toml` al repositorio. El `.gitignore` ya lo excluye
 5. Pulsa **Consultar Stake** y luego **Ejecutar análisis**.
 6. En consenso, cada modelo analiza por separado y el juez revisa la conclusión.
 7. Solo una selección que supere modelos, juez y gates aparecerá aprobada.
+
+Al terminar **Consultar Stake**, la interfaz se actualiza automáticamente para
+habilitar **Ejecutar análisis** tanto en modelo único como en consenso multiagente.
 
 Valores predeterminados:
 

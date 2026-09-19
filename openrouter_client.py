@@ -67,7 +67,29 @@ def list_models(api_key: str = "", timeout: int = 30) -> list[dict[str, Any]]:
     return sorted(output, key=lambda item: item["id"].lower())
 
 
-def _extract_json(text: str) -> dict[str, Any]:
+def _message_text(message: dict[str, Any]) -> str:
+    """Normaliza contenido OpenRouter, que puede llegar como texto o bloques."""
+    content = message.get("content")
+    if isinstance(content, str):
+        return content.strip()
+    if isinstance(content, list):
+        parts: list[str] = []
+        for block in content:
+            if isinstance(block, str):
+                parts.append(block)
+            elif isinstance(block, dict):
+                value = block.get("text") or block.get("content")
+                if isinstance(value, str):
+                    parts.append(value)
+        return "\n".join(parts).strip()
+    return ""
+
+
+def _extract_json(text: Any) -> dict[str, Any]:
+    if not isinstance(text, str) or not text.strip():
+        raise OpenRouterError(
+            "El modelo terminó sin devolver contenido JSON. Intenta nuevamente o cambia de proveedor/modelo."
+        )
     cleaned = text.strip()
     cleaned = re.sub(r"^```(?:json)?\s*|\s*```$", "", cleaned, flags=re.I)
     try:
@@ -179,9 +201,37 @@ Esquema exacto:
         raise OpenRouterError(f"OpenRouter respondió HTTP {response.status_code}: {detail}")
     try:
         body = response.json()
-        content = body["choices"][0]["message"]["content"]
+        message = body["choices"][0]["message"]
+        content = _message_text(message)
     except (ValueError, KeyError, IndexError, TypeError) as exc:
         raise OpenRouterError("Respuesta inesperada de OpenRouter.") from exc
+    if not content:
+        # Algunos proveedores consumen la respuesta al usar búsqueda web o salida
+        # estructurada. Reintentamos una vez sin esas extensiones.
+        retry_payload = dict(payload)
+        retry_payload.pop("plugins", None)
+        retry_payload.pop("response_format", None)
+        retry_response = requests.post(
+            OPENROUTER_URL,
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+                "HTTP-Referer": "https://streamlit.io",
+                "X-Title": "Stake Direct v2 Strict",
+            },
+            json=retry_payload,
+            timeout=timeout,
+        )
+        if not retry_response.ok:
+            raise OpenRouterError(
+                f"OpenRouter no pudo reintentar la respuesta vacía "
+                f"(HTTP {retry_response.status_code}): {retry_response.text[:500]}"
+            )
+        try:
+            retry_body = retry_response.json()
+            content = _message_text(retry_body["choices"][0]["message"])
+        except (ValueError, KeyError, IndexError, TypeError) as exc:
+            raise OpenRouterError("Respuesta inesperada de OpenRouter en el reintento.") from exc
     result = _extract_json(content)
     missing = required - result.keys()
     if missing:
@@ -291,7 +341,8 @@ Devuelve SOLO JSON:
     if not response.ok:
         raise OpenRouterError(f"El juez respondió HTTP {response.status_code}: {response.text[:500]}")
     try:
-        result = _extract_json(response.json()["choices"][0]["message"]["content"])
+        message = response.json()["choices"][0]["message"]
+        result = _extract_json(_message_text(message))
         return {
             "approved": bool(result["approved"]),
             "confidence": float(result["confidence"]),
