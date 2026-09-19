@@ -57,7 +57,7 @@ streamlit run app.py
 
 ```toml
 OPENROUTER_API_KEY = "sk-or-v1-tu-clave"
-OPENROUTER_MODEL = "openai/gpt-5.6-sol"
+OPENROUTER_MODEL = "google/gemini-3.8-flash"
 ```
 
 4. Pulsa **Deploy**.
@@ -79,10 +79,14 @@ No subas `.streamlit/secrets.toml` al repositorio. El `.gitignore` ya lo excluye
 
 Valores predeterminados:
 
-- Modelo único: `openai/gpt-5.6-sol`.
-- Analistas: `anthropic/claude-fable-5`, `openai/gpt-5.6-sol` y
-  `perplexity/sonar-deep-research`.
-- Juez: `openai/gpt-5.6-sol`.
+- Modelo único: `google/gemini-3.8-flash`.
+- Analistas: `google/gemini-3.8-flash`, `qwen/qwen3.8-max-0902` y
+  `deepseek/deepseek-v4-pro`.
+- Juez: `google/gemini-3.8-flash`.
+
+Los identificadores se agregan al selector aunque el catálogo temporalmente no
+pueda cargarse. Para ejecutar una corrida, cada modelo debe estar disponible en
+la cuenta y los proveedores habilitados de OpenRouter.
 
 ## Resultados y correcciones
 

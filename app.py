@@ -20,11 +20,11 @@ st.set_page_config(page_title="Stake Multiagente v3", page_icon="🎯", layout="
 st.title("🎯 Corridas Stake — OpenRouter multiagente")
 st.caption("Stake directo · Perfiles especializados · Consenso de modelos · Juez independiente")
 
-DEFAULT_SINGLE_MODEL = "openai/gpt-5.6-sol"
+DEFAULT_SINGLE_MODEL = "google/gemini-3.8-flash"
 DEFAULT_ANALYST_MODELS = [
-    "anthropic/claude-fable-5",
-    "openai/gpt-5.6-sol",
-    "perplexity/sonar-deep-research",
+    "google/gemini-3.8-flash",
+    "qwen/qwen3.8-max-0902",
+    "deepseek/deepseek-v4-pro",
 ]
 
 
