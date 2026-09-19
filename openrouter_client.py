@@ -9,10 +9,36 @@ import requests
 
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 OPENROUTER_MODELS_URL = "https://openrouter.ai/api/v1/models"
+OPENROUTER_KEY_URL = "https://openrouter.ai/api/v1/auth/key"
 
 
 class OpenRouterError(RuntimeError):
     pass
+
+
+def verify_api_key(api_key: str, timeout: int = 20) -> dict[str, Any]:
+    if not api_key or api_key in {"None", "null"}:
+        raise OpenRouterError("No se encontró una API key de OpenRouter.")
+    response = requests.get(
+        OPENROUTER_KEY_URL,
+        headers={"Authorization": f"Bearer {api_key}", "Accept": "application/json"},
+        timeout=timeout,
+    )
+    if not response.ok:
+        raise OpenRouterError(
+            f"OpenRouter rechazó la API key (HTTP {response.status_code})."
+        )
+    try:
+        data = response.json().get("data", response.json())
+    except ValueError as exc:
+        raise OpenRouterError("OpenRouter no devolvió una verificación válida.") from exc
+    return {
+        "valid": True,
+        "label": data.get("label"),
+        "limit": data.get("limit"),
+        "usage": data.get("usage"),
+        "is_free_tier": data.get("is_free_tier"),
+    }
 
 
 def list_models(api_key: str = "", timeout: int = 30) -> list[dict[str, Any]]:
@@ -118,7 +144,9 @@ Esquema exacto:
         ],
         "response_format": {"type": "json_object"},
     }
-    if use_web:
+    # Los modelos Sonar ya incluyen búsqueda; añadir el plugin web puede duplicarla
+    # o ser rechazado por algunos proveedores.
+    if use_web and not model.startswith("perplexity/"):
         payload["plugins"] = [{"id": "web", "max_results": 5}]
     response = requests.post(
         OPENROUTER_URL,
@@ -131,6 +159,21 @@ Esquema exacto:
         json=payload,
         timeout=timeout,
     )
+    if not response.ok and response.status_code == 400:
+        # Algunos modelos no admiten response_format aunque obedecen el esquema del prompt.
+        fallback_payload = dict(payload)
+        fallback_payload.pop("response_format", None)
+        response = requests.post(
+            OPENROUTER_URL,
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+                "HTTP-Referer": "https://streamlit.io",
+                "X-Title": "Stake Direct v2 Strict",
+            },
+            json=fallback_payload,
+            timeout=timeout,
+        )
     if not response.ok:
         detail = response.text[:700]
         raise OpenRouterError(f"OpenRouter respondió HTTP {response.status_code}: {detail}")

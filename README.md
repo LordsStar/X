@@ -57,10 +57,13 @@ streamlit run app.py
 
 ```toml
 OPENROUTER_API_KEY = "sk-or-v1-tu-clave"
-OPENROUTER_MODEL = "openai/gpt-4.1-mini"
+OPENROUTER_MODEL = "openai/gpt-5.6-sol"
 ```
 
 4. Pulsa **Deploy**.
+
+La app verifica la clave con OpenRouter y muestra `OpenRouter conectado`. También
+acepta el formato alternativo `[openrouter] api_key = "..."` en Secrets.
 
 No subas `.streamlit/secrets.toml` al repositorio. El `.gitignore` ya lo excluye.
 
@@ -73,6 +76,13 @@ No subas `.streamlit/secrets.toml` al repositorio. El `.gitignore` ya lo excluye
 5. Pulsa **Consultar Stake** y luego **Ejecutar análisis**.
 6. En consenso, cada modelo analiza por separado y el juez revisa la conclusión.
 7. Solo una selección que supere modelos, juez y gates aparecerá aprobada.
+
+Valores predeterminados:
+
+- Modelo único: `openai/gpt-5.6-sol`.
+- Analistas: `anthropic/claude-fable-5`, `openai/gpt-5.6-sol` y
+  `perplexity/sonar-deep-research`.
+- Juez: `openai/gpt-5.6-sol`.
 
 ## Resultados y correcciones
 

@@ -1,6 +1,6 @@
 {
   "name": "Lógica directa Stake v2 estricta",
-  "version": "3.0.0",
+  "version": "3.0.1",
   "odds_range": [1.4, 2.0],
   "selection": {"max_approved_picks": 1, "no_pick_is_valid": true},
   "validation": {

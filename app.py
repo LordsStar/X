@@ -9,7 +9,7 @@ import pandas as pd
 import streamlit as st
 
 from engine import evaluate, rank_candidates
-from openrouter_client import OpenRouterError, build_consensus, judge_consensus, list_models, validate_candidate
+from openrouter_client import OpenRouterError, build_consensus, judge_consensus, list_models, validate_candidate, verify_api_key
 from stake_client import StakeClient, StakeError
 
 ROOT = Path(__file__).parent
@@ -20,17 +20,48 @@ st.set_page_config(page_title="Stake Multiagente v3", page_icon="🎯", layout="
 st.title("🎯 Corridas Stake — OpenRouter multiagente")
 st.caption("Stake directo · Perfiles especializados · Consenso de modelos · Juez independiente")
 
+DEFAULT_SINGLE_MODEL = "openai/gpt-5.6-sol"
+DEFAULT_ANALYST_MODELS = [
+    "anthropic/claude-fable-5",
+    "openai/gpt-5.6-sol",
+    "perplexity/sonar-deep-research",
+]
+
 
 def secret(name: str, default: str = "") -> str:
     try:
-        return str(st.secrets.get(name, os.getenv(name, default)))
+        value = st.secrets.get(name)
+        if value not in (None, "", "None", "null"):
+            return str(value).strip()
     except Exception:
-        return os.getenv(name, default)
+        pass
+    value = os.getenv(name)
+    return str(value).strip() if value else default
+
+
+def openrouter_secret() -> str:
+    direct = secret("OPENROUTER_API_KEY")
+    if direct:
+        return direct
+    for section_name in ("openrouter", "OPENROUTER"):
+        try:
+            section = st.secrets[section_name]
+            value = section.get("api_key") or section.get("API_KEY")
+            if value:
+                return str(value).strip()
+        except Exception:
+            continue
+    return ""
 
 
 @st.cache_data(ttl=3600, show_spinner=False)
 def cached_models(api_key: str) -> list[dict]:
     return list_models(api_key)
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def cached_key_status(api_key: str) -> dict:
+    return verify_api_key(api_key)
 
 
 def display_table(rows: list[dict]) -> None:
@@ -70,7 +101,16 @@ for key, default in {"scan": None, "evaluations": [], "history": [], "model_cata
 with st.sidebar:
     st.header("Configuración")
     api_key_input = st.text_input("OpenRouter API key", type="password")
-    api_key = api_key_input or secret("OPENROUTER_API_KEY")
+    api_key = api_key_input.strip() or openrouter_secret()
+    if api_key:
+        try:
+            key_status = cached_key_status(api_key)
+            key_label = key_status.get("label") or "clave reconocida"
+            st.success(f"OpenRouter conectado: {key_label}")
+        except OpenRouterError as exc:
+            st.error(str(exc))
+    else:
+        st.error("No se encontró OPENROUTER_API_KEY en Secrets.")
     if st.button("Actualizar catálogo de modelos", use_container_width=True):
         cached_models.clear()
     try:
@@ -78,20 +118,24 @@ with st.sidebar:
     except Exception as exc:
         st.warning(f"Catálogo no disponible: {exc}")
     model_ids = [item["id"] for item in st.session_state.model_catalog]
-    fallback = secret("OPENROUTER_MODEL", "openai/gpt-4.1-mini")
-    if fallback not in model_ids:
-        model_ids = [fallback] + model_ids
+    configured_default = secret("OPENROUTER_MODEL", DEFAULT_SINGLE_MODEL)
+    priority_models = DEFAULT_ANALYST_MODELS + [configured_default]
+    model_ids = list(dict.fromkeys(priority_models + model_ids))
 
     mode = st.radio("Modo de análisis", ["Consenso multiagente", "Modelo único"])
     if mode == "Consenso multiagente":
         analyst_models = st.multiselect(
             "Modelos analistas (2–3)", model_ids,
-            default=model_ids[:2] if len(model_ids) >= 2 else model_ids,
+            default=DEFAULT_ANALYST_MODELS,
             max_selections=3,
         )
-        judge_model = st.selectbox("Modelo juez", model_ids, index=0)
+        judge_model = st.selectbox(
+            "Modelo juez", model_ids, index=model_ids.index(DEFAULT_SINGLE_MODEL)
+        )
     else:
-        analyst_models = [st.selectbox("Modelo analista", model_ids, index=0)]
+        analyst_models = [st.selectbox(
+            "Modelo analista", model_ids, index=model_ids.index(DEFAULT_SINGLE_MODEL)
+        )]
         judge_model = analyst_models[0]
 
     profile_name = st.selectbox("Perfil de análisis", list(PROFILES))
