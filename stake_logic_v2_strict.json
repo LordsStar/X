@@ -1,0 +1,30 @@
+{
+  "name": "Lógica directa Stake v2 estricta",
+  "version": "3.0.0",
+  "odds_range": [1.4, 2.0],
+  "selection": {"max_approved_picks": 1, "no_pick_is_valid": true},
+  "validation": {
+    "second_model_required": true,
+    "min_ev": 0.04,
+    "max_divergence": 0.09,
+    "lineup_or_roster_confirmation_required": true
+  },
+  "risk": {
+    "max_single_stake": 0.05,
+    "max_total_exposure": 0.35,
+    "max_sport_exposure": 0.25
+  },
+  "market_quality": {"max_overround": 0.12},
+  "markets": {
+    "primary_regex": "^(winner(?:\\s*\\(.*\\))?|moneyline|match winner|full time result|1x2|draw no bet|double chance|match result|to win match|head to head|h2h)$",
+    "protected_regex": "^(draw no bet|double chance)$"
+  },
+  "exclusions": {
+    "sport_or_event_regex": "(virtual|bots?|duels?|ecricket|efootball|nba2k|madden|simulat|\\bfifa\\b)",
+    "competition_regex": "(srl|youth|u[- ]?1[789]|u[- ]?2[01]|reserves?|academy|doubles?|triple[- ]?a|minor league|liga pro|next pro|friendly|friendlies)"
+  },
+  "soccer": {
+    "draw_probability_dnb_required": 0.30,
+    "draw_probability_confidence_reduction_from": 0.25
+  }
+}

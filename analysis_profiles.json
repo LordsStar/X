@@ -1,0 +1,42 @@
+{
+  "Estricto general": {
+    "description": "Máxima prudencia multideporte; replica la lógica v2 estricta.",
+    "min_ev": 0.04,
+    "max_divergence": 0.09,
+    "min_confidence": 0.60,
+    "max_model_spread": 0.08,
+    "instructions": "Evalúa forma reciente, nivel de oposición, localía, descanso, lesiones, participantes confirmados y precio. No fuerces una selección."
+  },
+  "Equilibrado": {
+    "description": "Muestra oportunidades cercanas al umbral, con riesgo moderado.",
+    "min_ev": 0.02,
+    "max_divergence": 0.12,
+    "min_confidence": 0.55,
+    "max_model_spread": 0.10,
+    "instructions": "Acepta una ventaja moderada únicamente cuando existan fuentes actuales y participantes confirmados. Señala expresamente la incertidumbre."
+  },
+  "Especialista MLB": {
+    "description": "Abridores, bullpen, lineup, parque, viaje y splits relevantes.",
+    "min_ev": 0.04,
+    "max_divergence": 0.09,
+    "min_confidence": 0.62,
+    "max_model_spread": 0.07,
+    "instructions": "Prioriza abridores confirmados, FIP/xFIP o indicadores equivalentes, bullpen reciente, lineup oficial, parque, clima y descanso. No uses solo récord global."
+  },
+  "Especialista fútbol": {
+    "description": "Riesgo de empate, DNB, doble oportunidad, xG y alineaciones.",
+    "min_ev": 0.04,
+    "max_divergence": 0.09,
+    "min_confidence": 0.62,
+    "max_model_spread": 0.07,
+    "instructions": "Estima por separado victoria, empate y derrota. Prioriza xG, alineaciones, bajas, calendario y localía. Si el empate es alto, exige DNB o doble oportunidad."
+  },
+  "Especialista hockey": {
+    "description": "Portero titular, roster, descanso y mercado con prórroga.",
+    "min_ev": 0.04,
+    "max_divergence": 0.09,
+    "min_confidence": 0.62,
+    "max_model_spread": 0.07,
+    "instructions": "Confirma portero titular, bajas, descanso, back-to-back, equipos especiales y si el mercado incluye prórroga/penales."
+  }
+}
